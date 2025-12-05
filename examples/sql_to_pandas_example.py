@@ -2,7 +2,7 @@ import pandas as pd
 import sqlite3
 
 def main():
-    conn = sqlite3.connect("../../music.db")
+    conn = sqlite3.connect("../music.db")
     query = "SELECT * FROM tracks;"
     tracks = pd.read_sql_query(query, conn)
     albums = pd.read_sql_query("SELECT * FROM albums;", conn)
