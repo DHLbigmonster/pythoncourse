@@ -11,15 +11,42 @@ from portfolio_analytics.optimize import min_variance, max_sharpe
 from portfolio_analytics.metrics import portfolio_performance
 
 
-def test_min_variance():
-    mean_ret = pd.Series({"A": 0.1, "B": 0.05})
-    cov = pd.DataFrame({"A": [0.04, 0.00], "B": [0.00, 0.02]}, index=["A", "B"])
+@pytest.mark.parametrize("returns_dict, cov_matrix, expected_idx_greater", [
+    # Original case: B has lower variance (0.02 vs 0.04)
+    ({"A": 0.1, "B": 0.05}, [[0.04, 0.0], [0.0, 0.02]], 1),
 
+    # Reverse case: A has lower variance (0.01 vs 0.05)
+    ({"A": 0.1, "B": 0.1}, [[0.01, 0.0], [0.0, 0.05]], 0),
+
+    # Equal variance: Weights should be 0.5 each
+    ({"A": 0.08, "B": 0.08}, [[0.03, 0.0], [0.0, 0.03]], None),
+
+    # High correlation: B is still safer
+    ({"A": 0.1, "B": 0.05}, [[0.05, 0.04], [0.04, 0.05]], None),
+])
+def test_min_variance_parameterized(returns_dict, cov_matrix, expected_idx_greater):
+    # Setup
+    assets = list(returns_dict.keys())
+    mean_ret = pd.Series(returns_dict)
+    cov = pd.DataFrame(cov_matrix, index=assets, columns=assets)
+
+    # Execution
     weights = min_variance(mean_ret, cov)
-    assert abs(weights.sum() - 1.0) < 1e-7
-    # Because B has lower variance, we expect more weight on B
-    assert weights[1] > weights[0]
 
+    # Assertions
+    # 1. Weights must sum to 1 (Full investment constraint)
+    assert abs(weights.sum() - 1.0) < 1e-7
+
+    # 2. Weights should be positive (assuming no short-selling)
+    assert (weights >= 0).all()
+
+    # 3. Relative weight check
+    if expected_idx_greater is not None:
+        other_idx = 1 if expected_idx_greater == 0 else 0
+        assert weights[expected_idx_greater] > weights[other_idx]
+    else:
+        # For the equal variance case
+        np.testing.assert_allclose(weights[0], weights[1], atol=1e-7)
 
 def test_max_sharpe():
     mean_ret = pd.Series({"A": 0.1, "B": 0.05})

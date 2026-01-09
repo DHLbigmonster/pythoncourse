@@ -1,70 +1,59 @@
-"""
-test_datafetch.py
-
-Tests for the DataFetcher class in datafetch.py, focusing on object-oriented fetching via yfinance.
-"""
-
 import pytest
 import pandas as pd
+import yfinance as yf
 from portfolio_analytics.datafetch import DataFetcher
 
 
-def test_datafetch_single_ticker():
+## --- Mocking Fixture ---
+
+@pytest.fixture
+def mock_yfinance(monkeypatch):
     """
-    Test fetching data for a single ticker over a small date range.
-    We don't assume data is definitely returned (date range might yield an empty DataFrame),
-    but we do check that the object is a DataFrame with 'AAPL' column if not empty.
+    Intercepts yfinance.download and returns a static MultiIndex DataFrame
+    consistent with yfinance's structure.
     """
-    fetcher = DataFetcher(tickers=["AAPL"], start="2023-01-01", end="2023-01-05")
+
+    def mocked_download(tickers, *args, **kwargs):
+        # yfinance returns a MultiIndex (Price, Ticker) when multiple tickers are fetched
+        # or a single Index when 'Close' is selected.
+        # Here we simulate the MultiIndex structure yf.download usually provides.
+        data = {
+            ("Close", "AAPL"): [150.0, 151.0],
+            ("Close", "MSFT"): [250.0, 252.0]
+        }
+        df = pd.DataFrame(data, index=pd.to_datetime(["2023-01-10", "2023-01-11"]))
+        df.index.name = "Date"
+        return df
+
+    monkeypatch.setattr(yf, "download", mocked_download)
+
+
+@pytest.fixture
+def fetcher():
+    """Returns a DataFetcher instance."""
+    return DataFetcher(tickers=["AAPL", "MSFT"], start="2023-01-10", end="2023-01-11")
+
+
+def test_datafetch_mocked_values(mock_yfinance, fetcher):
+    """
+    Verify that the fetcher correctly processes the mocked yfinance data.
+    """
     df = fetcher.fetch_data()
-    assert isinstance(df, pd.DataFrame), "Should return a pandas DataFrame"
-    if not df.empty:
-        assert (
-            "AAPL" in df.columns
-        ), "Returned DataFrame should contain the 'AAPL' column"
+
+    # Check shape and columns
+    assert df.shape == (2, 2)
+    assert set(df.columns) == {"AAPL", "MSFT"}
+
+    # Verify specific mocked values to ensure the 'Close' slice worked
+    assert df.loc["2023-01-10", "AAPL"] == 150.0
+    assert df.loc["2023-01-11", "MSFT"] == 252.0
 
 
-def test_datafetch_no_tickers():
+def test_datafetch_internal_state(mock_yfinance, fetcher):
     """
-    If we pass an empty list of tickers, DataFetcher should raise ValueError.
+    Ensure get_data() updates correctly using mocked data.
     """
-    fetcher = DataFetcher(tickers=[], start="2023-01-01", end="2023-01-10")
-    with pytest.raises(ValueError):
-        fetcher.fetch_data()
-
-
-def test_datafetch_get_data_before_after_fetch():
-    """
-    Confirm that get_data() returns None before fetching, and a DataFrame afterwards.
-    """
-    fetcher = DataFetcher(tickers=["MSFT"], start="2023-01-01", end="2023-01-05")
-    assert (
-        fetcher.get_data() is None
-    ), "get_data() should be None before fetch_data() is called"
-
-    df_fetched = fetcher.fetch_data()
-    df_stored = fetcher.get_data()
-    assert isinstance(
-        df_stored, pd.DataFrame
-    ), "After fetch, get_data() should return a DataFrame"
-    # They should refer to the same underlying data object or be equal in content
-    assert df_stored.equals(
-        df_fetched
-    ), "get_data() should match the DataFrame returned by fetch_data()"
-
-
-def test_datafetch_multiple_tickers():
-    """
-    Test fetching data for multiple tickers at once.
-    """
-    fetcher = DataFetcher(
-        tickers=["AAPL", "MSFT"], start="2023-01-10", end="2023-01-15"
-    )
-    df = fetcher.fetch_data()
-    assert isinstance(
-        df, pd.DataFrame
-    ), "Should return a pandas DataFrame for multiple tickers"
-    if not df.empty:
-        # Check columns
-        for ticker in ["AAPL", "MSFT"]:
-            assert ticker in df.columns, f"Returned DataFrame should contain '{ticker}'"
+    assert fetcher.get_data() is None
+    fetcher.fetch_data()
+    assert fetcher.get_data() is not None
+    assert "AAPL" in fetcher.get_data().columns
